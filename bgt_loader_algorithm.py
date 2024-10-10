@@ -22,6 +22,7 @@ from qgis.core import (
     QgsProcessingParameterNumber,
     QgsProject,
     QgsVectorLayer,
+    QgsWkbTypes,
     QgsFeature,
     QgsGeometry,
     QgsVectorFileWriter,
@@ -40,17 +41,42 @@ from datetime import datetime
 class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
 
     layers = [
-        'bak', 'begroeidterreindeel', 'begroeidterreindeel_kruinlijn', 'bord', 'buurt',
-        'functioneelgebied', 'gebouwinstallatie', 'installatie', 'kast', 'kunstwerkdeel_lijn',
-        'kunstwerkdeel_punt', 'kunstwerkdeel_vlak', 'mast', 'onbegroeidterreindeel',
-        'onbegroeidterreindeel_kruinlijn', 'ondersteunendwaterdeel', 'ondersteunendwegdeel',
-        'ondersteunendwegdeel_kruinlijn', 'ongeclassificeerdobject', 'openbareruimte',
-        'openbareruimtelabel', 'overbruggingsdeel', 'overigbouwwerk', 'overigescheiding', 'paal',
-        'pand', 'pand_nummeraanduiding', 'put', 'scheiding_lijn', 'scheiding_vlak', 'sensor_lijn',
-        'sensor_punt', 'spoor', 'stadsdeel', 'straatmeubilair', 'tunneldeel', 'vegetatieobject_lijn',
-        'vegetatieobject_punt', 'vegetatieobject_vlak', 'waterdeel', 'waterinrichtingselement_lijn',
-        'waterinrichtingselement_punt', 'waterschap', 'wegdeel', 'wegdeel_kruinlijn',
-        'weginrichtingselement_lijn', 'weginrichtingselement_punt', 'weginrichtingselement_vlak', 'wijk'
+        "bak",
+        "begroeidterreindeel",
+        "bord",
+        "buurt",
+        "functioneelgebied",
+        "gebouwinstallatie",
+        "installatie",
+        "kast",
+        "kunstwerkdeel",
+        "mast",
+        "onbegroeidterreindeel",
+        "ondersteunendwaterdeel",
+        "ondersteunendwegdeel",
+        "ongeclassificeerdobject",
+        "openbareruimte",
+        "openbareruimtelabel",
+        "overbruggingsdeel",
+        "overigbouwwerk",
+        "overigescheiding",
+        "paal",
+        "pand",
+        "plaatsbepalingspunt",
+        "put",
+        "scheiding",
+        "sensor",
+        "spoor",
+        "stadsdeel",
+        "straatmeubilair",
+        "tunneldeel",
+        "vegetatieobject",
+        "waterdeel",
+        "waterinrichtingselement",
+        "waterschap",
+        "wegdeel",
+        "weginrichtingselement",
+        "wijk",
     ]
 
     OUTPUT_FOLDER = 'OUTPUT_FOLDER'
@@ -141,7 +167,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
     def check_status(self, download_request_id, base_url, feedback):
         status_url = f"{base_url}/{download_request_id}/status"
         headers = {'Content-Type': 'application/json'}
-        
+
         while True:
             response = requests.get(status_url, headers=headers)
             if response.status_code == 201:
@@ -155,7 +181,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
     def download_data(self, download_request_id, base_url, output_folder, wkt_polygon, feedback, parameters, context):
         status_url = f"{base_url}/{download_request_id}/status"
         headers = {'Content-Type': 'application/json'}
-        
+
         response = requests.get(status_url, headers=headers)
         if response.status_code == 201:
             download_href = response.json()["_links"]["download"]["href"]
@@ -210,7 +236,12 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
         clipping_geometry.grow(bbox_growth)
         clipping_geometry = QgsGeometry.fromRect(clipping_geometry)
 
-        clipped_layer = QgsVectorLayer("Polygon?crs=" + layer.crs().authid(), "Temporary Layer", "memory")
+        geometry_type = layer.geometryType()
+        feedback.pushInfo(f"Layer geometryType: {geometry_type.name}")  
+        if geometry_type == QgsWkbTypes.LineGeometry:
+            clipped_layer = QgsVectorLayer(f"LineString?crs={layer.crs().authid()}", "Temporary Layer", "memory")
+        else:
+            clipped_layer = QgsVectorLayer(f"{geometry_type.name}?crs={layer.crs().authid()}", "Temporary Layer", "memory")
         clipped_provider = clipped_layer.dataProvider()
         clipped_provider.addAttributes(layer.fields())
         clipped_layer.updateFields()
@@ -226,11 +257,13 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
 
         QgsVectorFileWriter.writeAsVectorFormat(clipped_layer, clipped_layer_path, "utf-8", layer.crs(), "ESRI Shapefile")
         clipped_layer = QgsVectorLayer(clipped_layer_path, f"{base_name}_{timestamp}", "ogr")
+        
         if not clipped_layer.isValid():
             raise QgsProcessingException(f"Error loading clipped layer: {clipped_layer_path}")
 
         return clipped_layer
 
+    
     def name(self):
         return 'bgtloader'
 
