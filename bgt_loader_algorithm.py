@@ -19,6 +19,7 @@ from qgis.core import (
     QgsProcessingParameterFeatureSource,
     QgsProcessingParameterBoolean,
     QgsProcessingParameterFolderDestination,
+    QgsProcessingParameterNumber,
     QgsProject,
     QgsVectorLayer,
     QgsFeature,
@@ -37,14 +38,24 @@ from datetime import datetime
 
 
 class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
+
+    layers = [
+        'bak', 'begroeidterreindeel', 'begroeidterreindeel_kruinlijn', 'bord', 'buurt',
+        'functioneelgebied', 'gebouwinstallatie', 'installatie', 'kast', 'kunstwerkdeel_lijn',
+        'kunstwerkdeel_punt', 'kunstwerkdeel_vlak', 'mast', 'onbegroeidterreindeel',
+        'onbegroeidterreindeel_kruinlijn', 'ondersteunendwaterdeel', 'ondersteunendwegdeel',
+        'ondersteunendwegdeel_kruinlijn', 'ongeclassificeerdobject', 'openbareruimte',
+        'openbareruimtelabel', 'overbruggingsdeel', 'overigbouwwerk', 'overigescheiding', 'paal',
+        'pand', 'pand_nummeraanduiding', 'put', 'scheiding_lijn', 'scheiding_vlak', 'sensor_lijn',
+        'sensor_punt', 'spoor', 'stadsdeel', 'straatmeubilair', 'tunneldeel', 'vegetatieobject_lijn',
+        'vegetatieobject_punt', 'vegetatieobject_vlak', 'waterdeel', 'waterinrichtingselement_lijn',
+        'waterinrichtingselement_punt', 'waterschap', 'wegdeel', 'wegdeel_kruinlijn',
+        'weginrichtingselement_lijn', 'weginrichtingselement_punt', 'weginrichtingselement_vlak', 'wijk'
+    ]
+
     OUTPUT_FOLDER = 'OUTPUT_FOLDER'
     POLYGON = 'POLYGON'
-    ROAD_SECTION = 'ROAD_SECTION'
-    BUILDING = 'BUILDING'
-    WATER_PART = 'WATER_PART'
-    VEGETATED_AREA = 'VEGETATED_AREA'
-    SUPPORTING_ROAD_SECTION = 'SUPPORTING_ROAD_SECTION'
-    
+
     def initAlgorithm(self, config):
         self.addParameter(
             QgsProcessingParameterFolderDestination(self.OUTPUT_FOLDER, "Output folder")
@@ -54,12 +65,21 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterFeatureSource(self.POLYGON, "Select polygon")
         )
 
-        # Voeg checkboxen toe voor elke laag
-        self.addParameter(QgsProcessingParameterBoolean(self.ROAD_SECTION, "Include Wegdeel", defaultValue=True))
-        self.addParameter(QgsProcessingParameterBoolean(self.BUILDING, "Include Pand", defaultValue=True))
-        self.addParameter(QgsProcessingParameterBoolean(self.WATER_PART, "Include Waterdeel", defaultValue=True))
-        self.addParameter(QgsProcessingParameterBoolean(self.VEGETATED_AREA, "Include Begroeid Terrein", defaultValue=True))
-        self.addParameter(QgsProcessingParameterBoolean(self.SUPPORTING_ROAD_SECTION, "Include Ondersteunend Wegdeel", defaultValue=True))
+        self.addParameter(QgsProcessingParameterNumber(
+            'bbox_growth',
+            'Bounding Box Growth (meters)',
+            defaultValue=200.0
+        ))
+
+        # Dynamically add parameters for each layer
+        for layer in self.layers:
+            self.addParameter(
+                QgsProcessingParameterBoolean(
+                    f"include_{layer}",
+                    f"Include {layer.replace('_', ' ').capitalize()}",
+                    defaultValue=False
+                )
+            )
 
     def processAlgorithm(self, parameters, context, feedback):
         output_folder = self.parameterAsString(parameters, self.OUTPUT_FOLDER, context)
@@ -85,25 +105,18 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
 
         # Verzamel de geselecteerde lagen op basis van de checkboxen
         selected_layers = []
-        if self.parameterAsBoolean(parameters, self.ROAD_SECTION, context):
-            selected_layers.append("wegdeel")
-        if self.parameterAsBoolean(parameters, self.BUILDING, context):
-            selected_layers.append("pand")
-        if self.parameterAsBoolean(parameters, self.WATER_PART, context):
-            selected_layers.append("waterdeel")
-        if self.parameterAsBoolean(parameters, self.VEGETATED_AREA, context):
-            selected_layers.append("begroeidterreindeel")
-        if self.parameterAsBoolean(parameters, self.SUPPORTING_ROAD_SECTION, context):
-            selected_layers.append("ondersteunendwegdeel")
+        for layer in self.layers:
+            if self.parameterAsBoolean(parameters, f"include_{layer}", context):
+                selected_layers.append(layer)
 
         feedback.pushInfo(f"Geselecteerde lagen: {', '.join(selected_layers)}")
 
         # Hier wordt feedback toegevoegd aan de download_geodata methode
-        self.download_geodata(wkt_polygon, output_folder, selected_layers, feedback)
+        self.download_geodata(wkt_polygon, output_folder, selected_layers, feedback, parameters, context)
 
         return {}
 
-    def download_geodata(self, wkt_polygon, output_folder, selected_layers, feedback):
+    def download_geodata(self, wkt_polygon, output_folder, selected_layers, feedback, parameters, context):
         base_url = "https://api.pdok.nl/lv/bgt/download/v1_0/full/custom"
         headers = {'Content-Type': 'application/json'}
 
@@ -118,7 +131,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
             if response.status_code == 202:
                 download_request_id = response.json().get("downloadRequestId")
                 if not self.check_status(download_request_id, base_url, feedback):
-                    self.download_data(download_request_id, base_url, output_folder, wkt_polygon, feedback)
+                    self.download_data(download_request_id, base_url, output_folder, wkt_polygon, feedback, parameters, context)
             else:
                 feedback.pushInfo(f"Error retrieving data: {response.status_code}\n{response.text}")
 
@@ -139,7 +152,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
                 feedback.pushInfo(f"Error checking status: {response.status_code}\n{response.text}")
                 return True
 
-    def download_data(self, download_request_id, base_url, output_folder, wkt_polygon, feedback):
+    def download_data(self, download_request_id, base_url, output_folder, wkt_polygon, feedback, parameters, context):
         status_url = f"{base_url}/{download_request_id}/status"
         headers = {'Content-Type': 'application/json'}
         
@@ -156,13 +169,14 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
                 with open(output_path, 'wb') as f:
                     f.write(data_response.content)
                 feedback.pushInfo(f"Data saved to {output_path}")
-                self.extract_and_load_data(output_path, output_folder, wkt_polygon, feedback)
+                bbox_growth = self.parameterAsDouble(parameters, 'bbox_growth', context)
+                self.extract_and_load_data(output_path, output_folder, wkt_polygon, feedback, bbox_growth, parameters, context)
             else:
                 feedback.pushInfo("Error downloading data.")
         else:
             feedback.pushInfo("Error obtaining download URL.")
 
-    def extract_and_load_data(self, zip_path, output_folder, wkt_polygon, feedback):
+    def extract_and_load_data(self, zip_path, output_folder, wkt_polygon, feedback, bbox_growth, parameters, context):
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(output_folder)
             extracted_files = zip_ref.namelist()
@@ -181,18 +195,19 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
 
             layer.setSubsetString('"eindRegist" IS NULL')
 
-            clipped_layer = self.clip_layer_to_polygon(layer, wkt_polygon, file_name, feedback)
+            bbox_growth = self.parameterAsDouble(parameters, 'bbox_growth', context)
+            clipped_layer = self.clip_layer_to_polygon(layer, wkt_polygon, file_name, feedback, bbox_growth)
             QgsProject.instance().addMapLayer(clipped_layer)
 
             feedback.pushInfo(f"Layer loaded and corrected in QGIS: {file_path}")
 
-    def clip_layer_to_polygon(self, layer, polygon_wkt, original_name, feedback):
+    def clip_layer_to_polygon(self, layer, polygon_wkt, original_name, feedback, bbox_growth):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_name = os.path.splitext(original_name)[0]
         clipped_layer_path = os.path.join(tempfile.gettempdir(), f"clipped_{base_name}_{timestamp}.shp")
 
         clipping_geometry = QgsGeometry.fromWkt(polygon_wkt).boundingBox()
-        clipping_geometry.grow(200)
+        clipping_geometry.grow(bbox_growth)
         clipping_geometry = QgsGeometry.fromRect(clipping_geometry)
 
         clipped_layer = QgsVectorLayer("Polygon?crs=" + layer.crs().authid(), "Temporary Layer", "memory")
