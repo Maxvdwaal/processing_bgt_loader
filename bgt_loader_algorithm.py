@@ -20,6 +20,7 @@ from qgis.core import (
     QgsProcessingParameterBoolean,
     QgsProcessingParameterFolderDestination,
     QgsProcessingParameterNumber,
+    QgsProcessingParameterString,
     QgsProject,
     QgsVectorLayer,
     QgsWkbTypes,
@@ -88,7 +89,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
         )
 
         self.addParameter(
-            QgsProcessingParameterFeatureSource(self.POLYGON, "Select polygon")
+            QgsProcessingParameterFeatureSource(self.POLYGON, "Selecteer een enkele feature uit de volgende laag:")
         )
 
         self.addParameter(QgsProcessingParameterNumber(
@@ -101,8 +102,8 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
         for layer in self.layers:
             self.addParameter(
                 QgsProcessingParameterBoolean(
-                    f"include_{layer}",
-                    f"Include {layer.replace('_', ' ').capitalize()}",
+                    f"{layer}",
+                    f"{layer.replace('_', ' ').capitalize()}",
                     defaultValue=False
                 )
             )
@@ -271,7 +272,8 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
         return self.tr('Download and import BGT layers')
 
     def group(self):
-        return self.tr(self.groupId())
+       # return self.tr(self.groupId())
+        pass
 
     def groupId(self):
         # return 'BGT Loader'
