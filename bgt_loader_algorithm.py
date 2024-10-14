@@ -42,42 +42,42 @@ from datetime import datetime
 class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
 
     layers = [
-        "bak",
-        "begroeidterreindeel",
-        "bord",
-        "buurt",
-        "functioneelgebied",
-        "gebouwinstallatie",
-        "installatie",
-        "kast",
-        "kunstwerkdeel",
-        "mast",
-        "onbegroeidterreindeel",
-        "ondersteunendwaterdeel",
-        "ondersteunendwegdeel",
-        "ongeclassificeerdobject",
-        "openbareruimte",
-        "openbareruimtelabel",
-        "overbruggingsdeel",
-        "overigbouwwerk",
-        "overigescheiding",
-        "paal",
-        "pand",
-        "plaatsbepalingspunt",
-        "put",
-        "scheiding",
-        "sensor",
-        "spoor",
-        "stadsdeel",
-        "straatmeubilair",
-        "tunneldeel",
-        "vegetatieobject",
-        "waterdeel",
-        "waterinrichtingselement",
-        "waterschap",
-        "wegdeel",
-        "weginrichtingselement",
-        "wijk",
+        'bak',
+        'begroeidterreindeel',
+        'bord',
+        'buurt',
+        'functioneelgebied',
+        'gebouwinstallatie',
+        'installatie',
+        'kast',
+        'kunstwerkdeel',
+        'mast',
+        'onbegroeidterreindeel',
+        'ondersteunendwaterdeel',
+        'ondersteunendwegdeel',
+        'ongeclassificeerdobject',
+        'openbareruimte',
+        'openbareruimtelabel',
+        'overbruggingsdeel',
+        'overigbouwwerk',
+        'overigescheiding',
+        'paal',
+        'pand',
+        'plaatsbepalingspunt',
+        'put',
+        'scheiding',
+        'sensor',
+        'spoor',
+        'stadsdeel',
+        'straatmeubilair',
+        'tunneldeel',
+        'vegetatieobject',
+        'waterdeel',
+        'waterinrichtingselement',
+        'waterschap',
+        'wegdeel',
+        'weginrichtingselement',
+        'wijk',
     ]
 
     OUTPUT_FOLDER = 'OUTPUT_FOLDER'
@@ -94,7 +94,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
 
         self.addParameter(QgsProcessingParameterNumber(
             'bbox_growth',
-            'Bounding Box Growth (meters)',
+            'Buffer width',
             defaultValue=200.0
         ))
 
@@ -103,7 +103,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
             self.addParameter(
                 QgsProcessingParameterBoolean(
                     f"{layer}",
-                    f"{layer.replace('_', ' ').capitalize()}",
+                    f"Include {layer.replace('_', ' ').capitalize()}",
                     defaultValue=False
                 )
             )
@@ -133,7 +133,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
         # Verzamel de geselecteerde lagen op basis van de checkboxen
         selected_layers = []
         for layer in self.layers:
-            if self.parameterAsBoolean(parameters, f"include_{layer}", context):
+            if self.parameterAsBoolean(parameters, layer, context):
                 selected_layers.append(layer)
 
         feedback.pushInfo(f"Geselecteerde lagen: {', '.join(selected_layers)}")
@@ -152,6 +152,8 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
             "geofilter": wkt_polygon,
             "featuretypes": selected_layers
         }
+
+        feedback.pushInfo(f"Payload: {payload}")
 
         try:
             response = requests.post(base_url, headers=headers, json=payload)
@@ -174,7 +176,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
             if response.status_code == 201:
                 return False
             elif response.status_code == 200:
-                time.sleep(10)
+                time.sleep(5)
             else:
                 feedback.pushInfo(f"Error checking status: {response.status_code}\n{response.text}")
                 return True
