@@ -17,17 +17,17 @@
 from qgis.core import (
     QgsProcessingAlgorithm,
     QgsProcessingParameterFeatureSource,
-    QgsProcessingParameterBoolean,
     QgsProcessingParameterFolderDestination,
     QgsProcessingParameterNumber,
-    QgsProcessingParameterString,
-    QgsProject,
+    QgsProcessingParameterFeatureSink,
+    QgsFeatureSink,
     QgsVectorLayer,
     QgsWkbTypes,
     QgsFeature,
     QgsGeometry,
     QgsVectorFileWriter,
     QgsProcessingException,
+    QgsProcessing
 )
 
 from qgis.PyQt.QtCore import QCoreApplication
@@ -94,17 +94,19 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
 
         self.addParameter(QgsProcessingParameterNumber(
             'bbox_growth',
-            'Buffer width',
+            'Bufferbreedte in meters:',
             defaultValue=200.0
         ))
 
         # Dynamically add parameters for each layer
         for layer in self.layers:
             self.addParameter(
-                QgsProcessingParameterBoolean(
-                    f"{layer}",
-                    f"Include {layer.replace('_', ' ').capitalize()}",
-                    defaultValue=False
+                QgsProcessingParameterFeatureSink(
+                    layer,
+                    f"Output {layer}",
+                    QgsProcessing.TypeVectorAnyGeometry,
+                    createByDefault=False,  # Default to skip
+                    optional=True  # User can skip this layer
                 )
             )
 
@@ -133,10 +135,12 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
         # Verzamel de geselecteerde lagen op basis van de checkboxen
         selected_layers = []
         for layer in self.layers:
-            if self.parameterAsBoolean(parameters, layer, context):
+            # Controleer of de inputwaarde van de laag niet None is
+            if parameters.get(layer) is not None:
                 selected_layers.append(layer)
 
         feedback.pushInfo(f"Geselecteerde lagen: {', '.join(selected_layers)}")
+
 
         # Hier wordt feedback toegevoegd aan de download_geodata methode
         self.download_geodata(wkt_polygon, output_folder, selected_layers, feedback, parameters, context)
@@ -213,22 +217,37 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
         for file_name in extracted_files:
             file_path = os.path.join(output_folder, file_name)
 
-            if not file_name.lower().endswith(".gml"):
-                feedback.pushInfo(f"Unsupported file type for automatic loading: {file_name}")
+            # Ensure it's a GML file and matches the pattern "bgt_{layer}.gml"
+            if not file_name.lower().endswith(".gml") or not file_name.startswith("bgt_"):
+                feedback.pushInfo(f"Skipping unsupported or unrecognized file: {file_name}")
                 continue
 
-            layer = QgsVectorLayer(file_path, file_name, "ogr")
+            # Extract the layer name from the file name, assuming pattern is "bgt_{layer}.gml"
+            layer_name = file_name.split("bgt_")[-1].split(".gml")[0]
+
+            # Check if the layer_name is in the list of selected layers
+            if layer_name not in self.layers:
+                feedback.pushInfo(f"Layer {layer_name} not recognized in selected layers.")
+                continue
+
+            # Load the .gml as a QgsVectorLayer
+            layer = QgsVectorLayer(file_path, layer_name, "ogr")
             if not layer.isValid():
-                feedback.pushInfo(f"Could not load layer: {file_path}")
+                feedback.pushInfo(f"Failed to load layer: {file_name}")
                 continue
 
-            layer.setSubsetString('"eindRegist" IS NULL')
-
-            bbox_growth = self.parameterAsDouble(parameters, 'bbox_growth', context)
+            # Clip the layer to the polygon with the growth factor
             clipped_layer = self.clip_layer_to_polygon(layer, wkt_polygon, file_name, feedback, bbox_growth)
-            QgsProject.instance().addMapLayer(clipped_layer)
 
-            feedback.pushInfo(f"Layer loaded and corrected in QGIS: {file_path}")
+            # Output to the feature sink corresponding to the layer
+            sink, _ = self.parameterAsSink(parameters, layer_name, context, clipped_layer.fields(), clipped_layer.wkbType(), clipped_layer.sourceCrs())
+
+            # Add the features to the sink
+            for feature in clipped_layer.getFeatures():
+                sink.addFeature(feature, QgsFeatureSink.FastInsert)
+
+            feedback.pushInfo(f"Layer {layer_name} processed and saved.")
+
 
     def clip_layer_to_polygon(self, layer, polygon_wkt, original_name, feedback, bbox_growth):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
