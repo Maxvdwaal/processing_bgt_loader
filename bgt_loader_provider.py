@@ -32,6 +32,8 @@ __revision__ = '$Format:%H$'
 
 from qgis.core import QgsProcessingProvider
 from .bgt_loader_algorithm import BgtLoaderAlgorithm
+from PyQt5.QtGui import QIcon
+import os
 
 
 class BgtLoaderProvider(QgsProcessingProvider):
@@ -79,7 +81,8 @@ class BgtLoaderProvider(QgsProcessingProvider):
         Should return a QIcon which is used for your provider inside
         the Processing toolbox.
         """
-        return QgsProcessingProvider.icon(self)
+        icon_path = os.path.join(os.path.dirname(__file__), "BGT_loader.svg")
+        return QIcon(icon_path)
 
     def longName(self):
         """
