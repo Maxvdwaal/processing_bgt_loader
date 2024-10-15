@@ -17,7 +17,7 @@
 from qgis.core import (
     QgsProcessingAlgorithm,
     QgsProcessingParameterFeatureSource,
-    QgsProcessingParameterFolderDestination,
+    QgsCoordinateReferenceSystem,
     QgsProcessingParameterNumber,
     QgsProcessingParameterFeatureSink,
     QgsFeatureSink,
@@ -80,20 +80,16 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
         'wijk',
     ]
 
-    OUTPUT_FOLDER = 'OUTPUT_FOLDER'
+    temp_dir = 'temp_dir'
     POLYGON = 'POLYGON'
 
     def initAlgorithm(self, config):
-        self.addParameter(
-            QgsProcessingParameterFolderDestination(self.OUTPUT_FOLDER, "Output folder")
-        )
-
         self.addParameter(
             QgsProcessingParameterFeatureSource(self.POLYGON, "Selecteer een enkele feature uit de volgende laag:")
         )
 
         self.addParameter(QgsProcessingParameterNumber(
-            'bbox_growth',
+            'buffer_distance',
             'Bufferbreedte in meters:',
             defaultValue=200.0
         ))
@@ -103,7 +99,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
             self.addParameter(
                 QgsProcessingParameterFeatureSink(
                     layer,
-                    f"Output {layer}",
+                    f"{layer}",
                     QgsProcessing.TypeVectorAnyGeometry,
                     createByDefault=False,  # Default to skip
                     optional=True  # User can skip this layer
@@ -111,43 +107,50 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
             )
 
     def processAlgorithm(self, parameters, context, feedback):
-        output_folder = self.parameterAsString(parameters, self.OUTPUT_FOLDER, context)
+        # Create a temporary directory for storing extracted files
+        with tempfile.TemporaryDirectory() as temp_dir:
+            feedback.pushInfo(f"Using temporary directory: {temp_dir}")
 
-        # Get the feature source (the polygon layer)
-        polygon_source = self.parameterAsSource(parameters, self.POLYGON, context)
+            # Get the feature source (the polygon layer)
+            polygon_source = self.parameterAsSource(parameters, self.POLYGON, context)
 
-        if not polygon_source:
-            raise QgsProcessingException("Invalid polygon layer.")
+            if not polygon_source:
+                raise QgsProcessingException("Invalid polygon layer.")
 
-        # Extract the WKT from the selected features
-        features = polygon_source.getFeatures()
-        wkt_polygon = ""
+            # Extract the WKT from the selected features
+            features = polygon_source.getFeatures()
+            wkt_polygon = ""
 
-        for feature in features:
-            if feature.isValid():
-                geom = feature.geometry()
-                wkt_polygon = geom.asWkt()  # Convert to WKT
-                break
+            for feature in features:
+                if feature.isValid():
+                    geom = feature.geometry()
+                    wkt_polygon = geom.asWkt()  # Convert to WKT
+                    break
 
-        if not wkt_polygon:
-            raise QgsProcessingException("No valid polygon geometry found.")
+            if not wkt_polygon:
+                raise QgsProcessingException("No valid polygon geometry found.")
 
-        # Verzamel de geselecteerde lagen op basis van de checkboxen
-        selected_layers = []
-        for layer in self.layers:
-            # Controleer of de inputwaarde van de laag niet None is
-            if parameters.get(layer) is not None:
-                selected_layers.append(layer)
+            # Verzamel de geselecteerde lagen op basis van de checkboxen
+            selected_layers = []
+            for layer in self.layers:
+                # Controleer of de inputwaarde van de laag niet None is
+                if parameters.get(layer) is not None:
+                    selected_layers.append(layer)
 
-        feedback.pushInfo(f"Geselecteerde lagen: {', '.join(selected_layers)}")
+            feedback.pushInfo(f"Geselecteerde lagen: {', '.join(selected_layers)}")
 
 
-        # Hier wordt feedback toegevoegd aan de download_geodata methode
-        self.download_geodata(wkt_polygon, output_folder, selected_layers, feedback, parameters, context)
+            # Hier wordt feedback toegevoegd aan de download_geodata methode
+            result = self.download_geodata(wkt_polygon, temp_dir, selected_layers, feedback, parameters, context)
 
-        return {}
+            #Register outputs in Sinks
+            outputs = {}
+            for layer_name, sink_path in result.items():
+                outputs[layer_name] = sink_path
 
-    def download_geodata(self, wkt_polygon, output_folder, selected_layers, feedback, parameters, context):
+            return outputs
+
+    def download_geodata(self, wkt_polygon, temp_dir, selected_layers, feedback, parameters, context):
         base_url = "https://api.pdok.nl/lv/bgt/download/v1_0/full/custom"
         headers = {'Content-Type': 'application/json'}
 
@@ -159,17 +162,21 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
 
         feedback.pushInfo(f"Payload: {payload}")
 
+        result_paths = {}  # Dictionary to store paths to processed layer outputs
+
         try:
             response = requests.post(base_url, headers=headers, json=payload)
             if response.status_code == 202:
                 download_request_id = response.json().get("downloadRequestId")
                 if not self.check_status(download_request_id, base_url, feedback):
-                    self.download_data(download_request_id, base_url, output_folder, wkt_polygon, feedback, parameters, context)
+                    result_paths = self.download_data(download_request_id, base_url, temp_dir, wkt_polygon, feedback, parameters, context)
             else:
                 feedback.pushInfo(f"Error retrieving data: {response.status_code}\n{response.text}")
 
         except requests.RequestException as e:
             feedback.pushInfo(f"An error occurred while retrieving data: {str(e)}")
+
+        return result_paths
 
     def check_status(self, download_request_id, base_url, feedback):
         status_url = f"{base_url}/{download_request_id}/status"
@@ -185,7 +192,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
                 feedback.pushInfo(f"Error checking status: {response.status_code}\n{response.text}")
                 return True
 
-    def download_data(self, download_request_id, base_url, output_folder, wkt_polygon, feedback, parameters, context):
+    def download_data(self, download_request_id, base_url, temp_dir, wkt_polygon, feedback, parameters, context):
         status_url = f"{base_url}/{download_request_id}/status"
         headers = {'Content-Type': 'application/json'}
 
@@ -196,67 +203,76 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
 
             data_response = requests.get(full_download_url)
             if data_response.status_code == 200:
-                if not os.path.exists(output_folder):
-                    os.makedirs(output_folder)
-                output_path = os.path.join(output_folder, f"geodata_{download_request_id}.zip")
+                if not os.path.exists(temp_dir):
+                    os.makedirs(temp_dir)
+                output_path = os.path.join(temp_dir, f"geodata_{download_request_id}.zip")
                 with open(output_path, 'wb') as f:
                     f.write(data_response.content)
                 feedback.pushInfo(f"Data saved to {output_path}")
-                bbox_growth = self.parameterAsDouble(parameters, 'bbox_growth', context)
-                self.extract_and_load_data(output_path, output_folder, wkt_polygon, feedback, bbox_growth, parameters, context)
+                buffer_distance = self.parameterAsDouble(parameters, 'buffer_distance', context)
+
+                # Extract and register the output paths for each layer
+                result_paths = self.extract_and_load_data(output_path, temp_dir, wkt_polygon, feedback, buffer_distance, parameters, context)
+                return result_paths
             else:
                 feedback.pushInfo("Error downloading data.")
         else:
             feedback.pushInfo("Error obtaining download URL.")
 
-    def extract_and_load_data(self, zip_path, output_folder, wkt_polygon, feedback, bbox_growth, parameters, context):
+        return {}
+
+
+    def extract_and_load_data(self, zip_path, temp_dir, wkt_polygon, feedback, buffer_distance, parameters, context):
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(output_folder)
+            zip_ref.extractall(temp_dir)
             extracted_files = zip_ref.namelist()
 
-        for file_name in extracted_files:
-            file_path = os.path.join(output_folder, file_name)
+        result_paths = {}  # Store output file paths
 
-            # Ensure it's a GML file and matches the pattern "bgt_{layer}.gml"
+        for file_name in extracted_files:
+            file_path = os.path.join(temp_dir, file_name)
+
             if not file_name.lower().endswith(".gml") or not file_name.startswith("bgt_"):
                 feedback.pushInfo(f"Skipping unsupported or unrecognized file: {file_name}")
                 continue
 
-            # Extract the layer name from the file name, assuming pattern is "bgt_{layer}.gml"
             layer_name = file_name.split("bgt_")[-1].split(".gml")[0]
 
-            # Check if the layer_name is in the list of selected layers
             if layer_name not in self.layers:
                 feedback.pushInfo(f"Layer {layer_name} not recognized in selected layers.")
                 continue
 
-            # Load the .gml as a QgsVectorLayer
             layer = QgsVectorLayer(file_path, layer_name, "ogr")
             if not layer.isValid():
                 feedback.pushInfo(f"Failed to load layer: {file_name}")
                 continue
 
-            # Clip the layer to the polygon with the growth factor
-            clipped_layer = self.clip_layer_to_polygon(layer, wkt_polygon, file_name, feedback, bbox_growth)
+            layer.setCrs(QgsCoordinateReferenceSystem("EPSG:28992"))
 
-            # Output to the feature sink corresponding to the layer
-            sink, _ = self.parameterAsSink(parameters, layer_name, context, clipped_layer.fields(), clipped_layer.wkbType(), clipped_layer.sourceCrs())
+            clipped_layer = self.clip_layer_to_polygon(layer, wkt_polygon, file_name, feedback, buffer_distance)
 
-            # Add the features to the sink
+            sink, sink_path = self.parameterAsSink(parameters, layer_name, context, clipped_layer.fields(), clipped_layer.wkbType(), clipped_layer.sourceCrs())
+
             for feature in clipped_layer.getFeatures():
                 sink.addFeature(feature, QgsFeatureSink.FastInsert)
 
             feedback.pushInfo(f"Layer {layer_name} processed and saved.")
 
+            # Register the sink path for the result
+            result_paths[layer_name] = sink_path
 
-    def clip_layer_to_polygon(self, layer, polygon_wkt, original_name, feedback, bbox_growth):
+        return result_paths
+
+    def clip_layer_to_polygon(self, layer, polygon_wkt, original_name, feedback, buffer_distance):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_name = os.path.splitext(original_name)[0]
         clipped_layer_path = os.path.join(tempfile.gettempdir(), f"clipped_{base_name}_{timestamp}.shp")
 
-        clipping_geometry = QgsGeometry.fromWkt(polygon_wkt).boundingBox()
-        clipping_geometry.grow(bbox_growth)
-        clipping_geometry = QgsGeometry.fromRect(clipping_geometry)
+        # Zet de WKT om naar een QgsGeometry object
+        polygon_geometry = QgsGeometry.fromWkt(polygon_wkt)
+
+       # Buffer de geometrie met de opgegeven parameters
+        buffered_geometry = polygon_geometry.buffer(buffer_distance, 1)
 
         geometry_type = layer.geometryType()
         feedback.pushInfo(f"Layer geometryType: {geometry_type.name}")  
@@ -267,19 +283,30 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
         clipped_provider = clipped_layer.dataProvider()
         clipped_provider.addAttributes(layer.fields())
         clipped_layer.updateFields()
+        
+        # We creëren een tijdelijke layer met EPSG:28992 als CRS
+        clipped_layer = QgsVectorLayer(f"{geometry_type.name}?crs=EPSG:28992", "Temporary Layer", "memory")
+        clipped_provider = clipped_layer.dataProvider()
+        clipped_provider.addAttributes(layer.fields())
+        clipped_layer.updateFields()
 
+        # Loop door de features in de oorspronkelijke laag en knip ze met de gebufferde geometrie
         features = layer.getFeatures()
         for feature in features:
             geom = feature.geometry()
-            if geom.intersects(clipping_geometry):
+            if geom.intersects(buffered_geometry):
+                # Voeg de geknipte geometrie toe aan de tijdelijke layer
                 clipped_feature = QgsFeature()
-                clipped_feature.setGeometry(geom.intersection(clipping_geometry))
+                clipped_feature.setGeometry(geom.intersection(buffered_geometry))
                 clipped_feature.setAttributes(feature.attributes())
                 clipped_provider.addFeature(clipped_feature)
 
-        QgsVectorFileWriter.writeAsVectorFormat(clipped_layer, clipped_layer_path, "utf-8", layer.crs(), "ESRI Shapefile")
+        # Schrijf de geknipte laag naar een shapefile, met EPSG:28992 als CRS
+        QgsVectorFileWriter.writeAsVectorFormat(clipped_layer, clipped_layer_path, "utf-8", QgsCoordinateReferenceSystem("EPSG:28992"), "ESRI Shapefile")
+
+        # Laad de opgeslagen laag opnieuw om zeker te zijn dat hij correct is
         clipped_layer = QgsVectorLayer(clipped_layer_path, f"{base_name}_{timestamp}", "ogr")
-        
+
         if not clipped_layer.isValid():
             raise QgsProcessingException(f"Error loading clipped layer: {clipped_layer_path}")
 
