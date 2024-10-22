@@ -14,7 +14,7 @@
  ***************************************************************************/
 """
 
-from qgis.core import (
+from qgis.core import ( # type: ignore
     QgsProcessingAlgorithm,
     QgsProcessingParameterFeatureSource,
     QgsCoordinateReferenceSystem,
@@ -30,7 +30,7 @@ from qgis.core import (
     QgsProcessing
 )
 
-from qgis.PyQt.QtCore import QCoreApplication
+from qgis.PyQt.QtCore import QCoreApplication # type: ignore
 import requests
 import time
 import os
