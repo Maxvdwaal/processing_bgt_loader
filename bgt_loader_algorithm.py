@@ -83,6 +83,8 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
     temp_dir = 'temp_dir'
     POLYGON = 'POLYGON'
 
+
+#Sample comment
     def initAlgorithm(self, config):
         self.addParameter(
             QgsProcessingParameterFeatureSource(self.POLYGON, "Selecteer een enkele feature uit de volgende laag:")
