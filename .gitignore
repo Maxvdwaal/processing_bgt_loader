@@ -4,10 +4,12 @@ __pycache__/
 *.pyo
 *.pyd
 *.pdb
+help/
+scripts/
 
 # Logs
 *.log
-*.txt
+
 
 # MacOS specifieke bestanden
 .DS_Store
@@ -33,8 +35,6 @@ help/build/
 help/.templates/
 help/_static/
 
-# Metadata
-metadata.txt
 
 # Configuratie bestanden die je misschien niet wilt delen
 pb_tool.cfg
