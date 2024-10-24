@@ -1,12 +1,12 @@
 [general]
 name=BGT Loader
 qgisMinimumVersion=3.0
-description=Plugin downloads and imports the BGT from API.
+description= A processing tool to download Dutch BGT data for a specific polygon area.
 version=0.1
 author=Max van der Waal
 email=m.vanderwaal@tudelft.nl
 
-about=Provide a brief description of the plugin and its purpose.
+about= BgtLoader is a QGIS processing tool designed to help users download Dutch BGT (Basisregistratie Grootschalige Topografie) data for a specific polygon area selected by the user. This tool fetches and processes the data, making it available for further analysis and visualization in QGIS.
 
 tracker= https://github.com/Maxvdwaal/processing_bgt_loader/issues
 repository= https://github.com/Maxvdwaal/processing_bgt_loader
