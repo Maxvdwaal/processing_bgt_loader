@@ -1,0 +1,44 @@
+# Python specifieke uitsluitingen
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+
+# Logs
+*.log
+*.txt
+
+# MacOS specifieke bestanden
+.DS_Store
+
+# Windows specifieke bestanden
+Thumbs.db
+ehthumbs.db
+
+# Build bestanden en output (voor documentatie of andere builds)
+build/
+dist/
+*.egg-info/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+.ENV/
+
+# Help / Documentation folders
+help/build/
+help/.templates/
+help/_static/
+
+# Metadata
+metadata.txt
+
+# Configuratie bestanden die je misschien niet wilt delen
+pb_tool.cfg
+
+# Git
+.git/
+.gitattributes
