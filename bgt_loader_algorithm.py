@@ -28,6 +28,9 @@ from qgis.core import ( # type: ignore
     QgsGeometry,
     QgsVectorFileWriter,
     QgsProcessingException,
+    QgsCoordinateTransform,
+    QgsCoordinateReferenceSystem,
+    QgsProject,
     QgsProcessing
 )
 
@@ -96,9 +99,15 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
             # Extract the geometry of the first valid polygon feature
             features = polygon_source.getFeatures()
             wkt_polygon = ""
+
+            target_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+            source_crs = polygon_source.sourceCrs()
+            transform = QgsCoordinateTransform(source_crs, target_crs, QgsProject.instance())
+
             for feature in features:
                 if feature.isValid():
                     geom = feature.geometry()
+                    geom.transform(transform)
                     wkt_polygon = geom.asWkt()
                     break
 
