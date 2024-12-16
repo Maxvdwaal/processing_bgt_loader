@@ -100,7 +100,7 @@ class BgtLoaderAlgorithm(QgsProcessingAlgorithm):
             features = polygon_source.getFeatures()
             wkt_polygon = ""
 
-            target_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+            target_crs = QgsCoordinateReferenceSystem("EPSG:28992")
             source_crs = polygon_source.sourceCrs()
             transform = QgsCoordinateTransform(source_crs, target_crs, QgsProject.instance())
 
